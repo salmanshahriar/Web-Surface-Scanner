@@ -2686,13 +2686,55 @@ def cross_target_pivot(results: List[Dict[str, object]], timeout: int, fetch_evi
     return pivot_additions
 
 
+def normalize_severity(value: object) -> str:
+    sev = str(value or SEVERITY_INFO).strip().lower()
+    return sev if sev in SEVERITY_ORDER else SEVERITY_INFO
+
+
+def severity_rank(value: object) -> int:
+    sev = normalize_severity(value)
+    return SEVERITY_ORDER.index(sev)
+
+
+def normalize_finding(item: object) -> Dict[str, object]:
+    if isinstance(item, dict):
+        severity = normalize_severity(item.get("severity"))
+        title = item.get("title") or item.get("name") or item.get("issue") or ""
+        detail = item.get("detail") or item.get("description") or item.get("message") or ""
+        category = item.get("category") or "uncategorized"
+        evidence = item.get("evidence")
+        recommendation = item.get("recommendation") or item.get("fix")
+        return {
+            **item,
+            "severity": severity,
+            "category": str(category),
+            "title": str(title),
+            "detail": str(detail),
+            "evidence": evidence,
+            "recommendation": recommendation,
+        }
+    return {
+        "severity": SEVERITY_INFO,
+        "category": "uncategorized",
+        "title": "Raw finding",
+        "detail": str(item),
+        "evidence": None,
+        "recommendation": None,
+    }
+
+
+def normalize_findings(items: object) -> List[Dict[str, object]]:
+    if not isinstance(items, list):
+        return []
+    return [normalize_finding(item) for item in items]
+
+
 def summarize(results: List[Dict[str, object]]) -> Dict[str, int]:
     counts = {s: 0 for s in SEVERITY_ORDER}
     for r in results:
-        for f in r.get("findings", []):
-            sev = f.get("severity", SEVERITY_INFO)
-            if sev in counts:
-                counts[sev] += 1
+        for f in normalize_findings(r.get("findings", [])):
+            sev = normalize_severity(f.get("severity"))
+            counts[sev] += 1
     return counts
 
 
@@ -2734,7 +2776,7 @@ def render_text_report(results: List[Dict[str, object]], totals: Dict[str, int],
         ports = r.get("open_ports") or []
         if ports:
             lines.append(f"  Ports:   {ports}")
-        findings = sorted(r.get("findings", []), key=lambda x: SEVERITY_ORDER.index(x.get("severity", SEVERITY_INFO)))
+        findings = sorted(normalize_findings(r.get("findings", [])), key=lambda x: severity_rank(x.get("severity")))
         if not findings:
             lines.append("  - No findings.")
         else:
@@ -2771,7 +2813,7 @@ def render_html_report(results: List[Dict[str, object]], totals: Dict[str, int],
             tls_line = html.escape(f"{tls.get('version')} | exp {tls.get('not_after')} | days left {tls.get('days_until_expiry')}")
         ports = r.get("open_ports") or []
         ports_line = html.escape(", ".join(str(p) for p in ports))
-        findings = sorted(r.get("findings", []), key=lambda x: SEVERITY_ORDER.index(x.get("severity", SEVERITY_INFO)))
+        findings = sorted(normalize_findings(r.get("findings", [])), key=lambda x: severity_rank(x.get("severity")))
         fbody = []
         for f in findings:
             sev = f.get("severity", "info")

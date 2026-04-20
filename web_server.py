@@ -58,6 +58,49 @@ def category_slug(value: str) -> str:
     return value.strip("_") or "uncategorized"
 
 
+def normalize_severity(value: Any) -> str:
+    sev = str(value or SEVERITY_INFO).strip().lower()
+    return sev if sev in SEVERITY_ORDER else SEVERITY_INFO
+
+
+def severity_rank(value: Any) -> int:
+    sev = normalize_severity(value)
+    return SEVERITY_ORDER.index(sev)
+
+
+def normalize_finding(item: Any) -> Dict[str, Any]:
+    if isinstance(item, dict):
+        severity = normalize_severity(item.get("severity"))
+        title = item.get("title") or item.get("name") or item.get("issue") or ""
+        detail = item.get("detail") or item.get("description") or item.get("message") or ""
+        category = item.get("category") or "uncategorized"
+        evidence = item.get("evidence")
+        recommendation = item.get("recommendation") or item.get("fix")
+        return {
+            **item,
+            "severity": severity,
+            "category": str(category),
+            "title": str(title),
+            "detail": str(detail),
+            "evidence": evidence,
+            "recommendation": recommendation,
+        }
+    return {
+        "severity": SEVERITY_INFO,
+        "category": "uncategorized",
+        "title": "Raw finding",
+        "detail": str(item),
+        "evidence": None,
+        "recommendation": None,
+    }
+
+
+def normalize_findings(items: Any) -> List[Dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    return [normalize_finding(item) for item in items]
+
+
 def validate_target(raw: str) -> Tuple[Optional[str], Optional[str]]:
     value = raw.strip()
     if not value:
@@ -100,7 +143,7 @@ def save_scan(targets: List[str], options: Dict[str, Any], results: List[Dict[st
 
     by_category: Dict[str, List[Dict[str, Any]]] = {}
     for r in results:
-        for finding in r.get("findings", []):
+        for finding in normalize_findings(r.get("findings", [])):
             cat = category_slug(finding.get("category", "uncategorized"))
             by_category.setdefault(cat, []).append(
                 {
@@ -465,8 +508,8 @@ def render_scan_page(summary: Dict[str, Any]) -> str:
     blocks = []
     for r in summary.get("results", []):
         findings = sorted(
-            r.get("findings", []),
-            key=lambda x: SEVERITY_ORDER.index(x.get("severity", SEVERITY_INFO)),
+            normalize_findings(r.get("findings", [])),
+            key=lambda x: severity_rank(x.get("severity")),
         )
         rows = []
         for f in findings:
